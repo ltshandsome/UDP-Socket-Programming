@@ -46,18 +46,18 @@ def connection_setup():
     print("Initial setting up...")
     
     s_udp = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
-    print("?")
+
     s_udp.settimeout(1)
-    print("?")
+
     s_tcp = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-    print("?")
+
     s_tcp.connect((HOST, PORT))
-    print("?")
+
     indata = s_tcp.recv(65535)
-    if indata == b'TCP packet from server':
+    if indata == b'received TCP packet from server':
         print("received TCP packet from server")
     else:
-        print("Error: received TCP packet from server")
+        print("Error: received TCP packet from server", indata)
         return 0
     
     s_tcp.sendall(b"received TCP packet from client")
@@ -97,13 +97,13 @@ def transmision(s_udp):
             if time.time()-start_time > time_slot:
                 print("[%d-%d]"%(time_slot-1, time_slot), "transmit", seq-prev_transmit)
                 time_slot += 1
-                prev_transmit = i
+                prev_transmit = seq
         except Exception as e:
             print(e)
             thread_stop = True
     thread_stop = True
     print("---transmision timeout---")
-    print("transmit", i, "packets")
+    print("transmit", seq, "packets")
 
 def receive(s_udp):
     s_udp.settimeout(3)
@@ -113,9 +113,10 @@ def receive(s_udp):
     seq = 1
 
     global thread_stop
-    while t.is_alive() and not thread_stop:
+    while not thread_stop:
         try:
             indata, addr = s_udp.recvfrom(1024)
+            print("hehehe")
             if len(indata) != 250:
                 print("packet with strange length: ", len(indata))
                 
@@ -138,12 +139,15 @@ def receive(s_udp):
 def remote_control(s_tcp, t):
     global thread_stop
     
-    while not thread_stop:
+    while t.is_alive() and not thread_stop:
         try:
-            print("waiting for stopping")
-            indata = s_tcp.recvfrom(1024)    ###might need to check
-            print('recvfrom ' + str(addr) + ': ' + indata.decode())
-            if not indata or indata.decode() == "STOP" or not addr:
+            #print("waiting for stopping")
+            indata, addr = s_tcp.recvfrom(1024)    ###might need to check
+            #print('recv message: ', addr, indata)
+            #if not indata or not addr:
+            #    print(indata, addr)
+            continue
+            if indata.decode() == "STOP":    
                 thread_stop = True
                 break
         except Exception as inst:
