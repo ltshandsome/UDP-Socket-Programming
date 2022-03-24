@@ -11,7 +11,7 @@ import subprocess
 
 parser = argparse.ArgumentParser()
 parser.add_argument("-p", "--port", type=int,
-                    help="port to bind", default=3437)
+                    help="port to bind", default=3237)
 parser.add_argument("-l", "--length", type=int,
                     help="payload length", default=250)
 parser.add_argument("-b", "--bandwidth", type=int,
@@ -21,7 +21,7 @@ parser.add_argument("-t", "--time", type=int,
                   
 args = parser.parse_args()
 
-HOST = '192.168.1.7'
+HOST = '192.168.1.108'
 PORT = args.port
 length_packet = args.length
 bandwidth = args.bandwidth
@@ -50,25 +50,18 @@ def connection_setup():
     conn, tcp_addr = s_tcp.accept()
     print(str(PORT), 'tcp Connected by', tcp_addr)
 
-    conn.sendall(b"received TCP packet from server")
+
+    return s_tcp, s_udp, conn
     
-    indata = conn.recv(65535)
-    if indata == b'received TCP packet from client':
-        print("received TCP packet from client")
-    else:
-        print("Error: received TCP packet from client")
-        
+udp_addr = None
 
-    return s_tcp, s_udp, tcp_addr
-
-def transmision(s_udp, client_addr):
+def transmision(s_udp):
     global thread_stop
+    global udp_addr
     print("start transmision to addr", s_udp)
     
     seq = 1
     prev_transmit = 0
-    
-    ok = (1).to_bytes(1, 'big')
     
     start_time = time.time()
     next_transmit_time = start_time + sleeptime
@@ -85,10 +78,11 @@ def transmision(s_udp, client_addr):
         datetimedec = int(t)
         microsec = int((t - int(t))*1000000)
         
-        redundent = os.urandom(250-4*3-1)
-        outdata = datetimedec.to_bytes(4, 'big') + microsec.to_bytes(4, 'big') + seq.to_bytes(4, 'big') + ok + redundent
+        redundent = os.urandom(250-4*3)
+        outdata = datetimedec.to_bytes(4, 'big') + microsec.to_bytes(4, 'big') + seq.to_bytes(4, 'big') + redundent
         
-        s_udp.sendto(outdata, client_addr)
+        if udp_addr != None:
+            s_udp.sendto(outdata, udp_addr)
         seq += 1
         
         if time.time()-start_time > time_slot:
@@ -109,16 +103,17 @@ def receive(s_udp):
     seq = 1
 
     global thread_stop
+    global udp_addr
     while not thread_stop:
         try:
+            
             indata, addr = s_udp.recvfrom(1024)
+            udp_addr = addr
+            
             if len(indata) != 250:
                 print("packet with strange length: ", len(indata))
-                
             seq = int(indata.hex()[16:24], 16)
             ts = int(int(indata.hex()[0:8], 16)) + float("0." + str(int(indata.hex()[8:16], 16)))
-            
-            ok = int(indata.hex()[24:25], 16)
             
             number_of_received_packets += 1
             
@@ -139,16 +134,16 @@ if not os.path.exists(pcap_path):
 now = dt.datetime.today()
 n = '-'.join([str(x) for x in[ now.year, now.month, now.day, now.hour, now.minute, now.second]])
 
-tcpproc =  subprocess.Popen(["tcpdump -i any port %s -w %s/%s_%s.pcap&"%(PORT, pcap_path,PORT, n)], shell=True)
+tcpproc =  subprocess.Popen(["sudo tcpdump -i any port %s -w %s/%s_%s.pcap"%(PORT, pcap_path,PORT, n)], shell=True, preexec_fn = os.setpgrp)
 time.sleep(1)
 
 try:
-    s_tcp, s_udp, client_addr = connection_setup()
+    s_tcp, s_udp, conn = connection_setup()
 except Exception as inst:
     print("Connection Error:", inst)
     exit()
 thread_stop = False
-t = threading.Thread(target = transmision, args = (s_udp, client_addr, ))
+t = threading.Thread(target = transmision, args = (s_udp, ))
 t1 = threading.Thread(target = receive, args = (s_udp,))
 
 
@@ -160,7 +155,7 @@ try:
         control_message = input("Enter STOP to stop: ")
         if control_message == "STOP":
             thread_stop = True
-            s_tcp.sendall("STOP".encode())
+            conn.sendall("STOP".encode())
             break
     thread_stop = True
     t.join()
@@ -170,4 +165,7 @@ try:
 except Exception as e:
     print(e)
 finally:
-    tcpproc.terminate()
+    pgid = os.getpgid(tcpproc.pid)
+    
+    command = "sudo kill -9 -{}".format(pgid)
+    subprocess.check_output(command.split(" "))

@@ -46,21 +46,9 @@ def connection_setup():
     print("Initial setting up...")
     
     s_udp = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
-    print("?")
     s_udp.settimeout(1)
-    print("?")
     s_tcp = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-    print("?")
     s_tcp.connect((HOST, PORT))
-    print("?")
-    indata = s_tcp.recv(65535)
-    if indata == b'TCP packet from server':
-        print("received TCP packet from server")
-    else:
-        print("Error: received TCP packet from server")
-        return 0
-    
-    s_tcp.sendall(b"received TCP packet from client")
     
     return s_tcp, s_udp
 
@@ -70,8 +58,6 @@ def transmision(s_udp):
     
     seq = 1
     prev_transmit = 0
-    
-    ok = (1).to_bytes(1, 'big')
     
     start_time = time.time()
     next_transmit_time = start_time + sleeptime
@@ -88,8 +74,8 @@ def transmision(s_udp):
             datetimedec = int(t)
             microsec = int((t - int(t))*1000000)
         
-            redundent = os.urandom(250-4*3-1)
-            outdata = datetimedec.to_bytes(4, 'big') + microsec.to_bytes(4, 'big') + seq.to_bytes(4, 'big') + ok + redundent
+            redundent = os.urandom(250-4*3)
+            outdata = datetimedec.to_bytes(4, 'big') + microsec.to_bytes(4, 'big') + seq.to_bytes(4, 'big') + redundent
         
             s_udp.sendto(outdata, server_addr)
             seq += 1
@@ -97,13 +83,13 @@ def transmision(s_udp):
             if time.time()-start_time > time_slot:
                 print("[%d-%d]"%(time_slot-1, time_slot), "transmit", seq-prev_transmit)
                 time_slot += 1
-                prev_transmit = i
+                prev_transmit = seq
         except Exception as e:
             print(e)
             thread_stop = True
     thread_stop = True
     print("---transmision timeout---")
-    print("transmit", i, "packets")
+    print("transmit", seq, "packets")
 
 def receive(s_udp):
     s_udp.settimeout(3)
@@ -113,16 +99,15 @@ def receive(s_udp):
     seq = 1
 
     global thread_stop
-    while t.is_alive() and not thread_stop:
+    while not thread_stop:
         try:
             indata, addr = s_udp.recvfrom(1024)
+            
             if len(indata) != 250:
                 print("packet with strange length: ", len(indata))
                 
             seq = int(indata.hex()[16:24], 16)
             ts = int(int(indata.hex()[0:8], 16)) + float("0." + str(int(indata.hex()[8:16], 16)))
-            
-            ok = int(indata.hex()[24:25], 16)
             
             number_of_received_packets += 1
             
@@ -138,26 +123,29 @@ def receive(s_udp):
 def remote_control(s_tcp, t):
     global thread_stop
     
-    while not thread_stop:
+    while t.is_alive() and not thread_stop:
         try:
-            print("waiting for stopping")
-            indata = s_tcp.recvfrom(1024)    ###might need to check
-            print('recvfrom ' + str(addr) + ': ' + indata.decode())
-            if not indata or indata.decode() == "STOP" or not addr:
+            indata, addr = s_tcp.recvfrom(1024)    ###might need to check
+            
+            if indata.decode() == "STOP":    
                 thread_stop = True
                 break
         except Exception as inst:
             print("Error: ", inst)
+    thread_stop = True
     print("STOP remote control")
 
 try:
     now = dt.datetime.today()
     n = '-'.join([str(x) for x in[ now.year, now.month, now.day, now.hour, now.minute, now.second]])
-    tcpproc = subprocess.Popen(["tcpdump -i any net 140.112.20.183 -w %s/%s.pcap &"%(pcap_path,n)], shell=True)
+    tcpproc = subprocess.Popen(["tcpdump -i any net 140.112.17.209 -w %s/%s.pcap"%(pcap_path,n)], shell=True, preexec_fn=os.setpgrp)
     s_tcp, s_udp = connection_setup()
 except Exception as inst:
     print("Error: ", inst)
-    tcpproc.terminate()
+    pgid = os.getpgid(tcpproc.pid)
+    
+    command = "kill -9 -{}".format(pgid)
+    subprocess.check_output(command.split(" "))
     exit()
     
 thread_stop = False
@@ -175,4 +163,7 @@ t3.join()
 s_tcp.close()
 s_udp.close()
 
-tcpproc.terminate()
+pgid = os.getpgid(tcpproc.pid)
+    
+command = "kill -9 -{}".format(pgid)
+subprocess.check_output(command.split(" "))
