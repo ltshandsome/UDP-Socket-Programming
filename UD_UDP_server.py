@@ -27,7 +27,8 @@ length_packet = args.length
 bandwidth = args.bandwidth
 total_time = args.time
 
-thread_stop = False
+thread_stop = True
+exit_main_process = False
 
 expected_packet_per_sec = bandwidth / (length_packet << 3)
 sleeptime = 1.0 / expected_packet_per_sec
@@ -82,6 +83,7 @@ def transmision(s_udp):
         outdata = datetimedec.to_bytes(4, 'big') + microsec.to_bytes(4, 'big') + seq.to_bytes(4, 'big') + redundent
         
         if udp_addr != None:
+            #print(udp_addr)
             s_udp.sendto(outdata, udp_addr)
         seq += 1
         
@@ -126,46 +128,69 @@ def receive(s_udp):
     print("Total capture: ", number_of_received_packets, "Total lose: ", seq - number_of_received_packets)
     print("STOP bypass")
 
-
-if not os.path.exists(pcap_path):
-    os.system("mkdir %s"%(pcap_path))
-
-
-now = dt.datetime.today()
-n = '-'.join([str(x) for x in[ now.year, now.month, now.day, now.hour, now.minute, now.second]])
-
-tcpproc =  subprocess.Popen(["sudo tcpdump -i any port %s -w %s/%s_%s.pcap"%(PORT, pcap_path,PORT, n)], shell=True, preexec_fn = os.setpgrp)
-time.sleep(1)
-
-try:
-    s_tcp, s_udp, conn = connection_setup()
-except Exception as inst:
-    print("Connection Error:", inst)
-    exit()
-thread_stop = False
-t = threading.Thread(target = transmision, args = (s_udp, ))
-t1 = threading.Thread(target = receive, args = (s_udp,))
+while not exit_main_process:
+    if not os.path.exists(pcap_path):
+        os.system("mkdir %s"%(pcap_path))
 
 
-t.start()
-t1.start()
+    now = dt.datetime.today()
+    n = '-'.join([str(x) for x in[ now.year, now.month, now.day, now.hour, now.minute, now.second]])
 
-try:
-    while t.is_alive():
-        control_message = input("Enter STOP to stop: ")
-        if control_message == "STOP":
-            thread_stop = True
-            conn.sendall("STOP".encode())
-            break
-    thread_stop = True
-    t.join()
-    t1.join()
-    s_tcp.close()
-    s_udp.close()
-except Exception as e:
-    print(e)
-finally:
-    pgid = os.getpgid(tcpproc.pid)
+    tcpproc =  subprocess.Popen(["sudo tcpdump -i any port %s -w %s/%s_%s.pcap"%(PORT, pcap_path,PORT, n)], shell=True, preexec_fn = os.setpgrp)
+    time.sleep(1)
+
+    try:
+        s_tcp, s_udp, conn = connection_setup()
+        
+        while thread_stop == True:
+            control_message = input("Enter START to start: ")
+            if control_message == "START":
+                thread_stop = False
+                conn.sendall("START".encode())
+                t = threading.Thread(target = transmision, args = (s_udp, ))
+                t1 = threading.Thread(target = receive, args = (s_udp,))
+
+
+                t.start()
+                t1.start()
+        
+    except KeyboardInterrupt as inst:
+        print("keyboard interrupt: ")
+        pgid = os.getpgid(tcpproc.pid)
     
-    command = "sudo kill -9 -{}".format(pgid)
-    subprocess.check_output(command.split(" "))
+        command = "sudo kill -9 -{}".format(pgid)
+        subprocess.check_output(command.split(" "))
+        exit()
+    except Exception as e:
+        print("Connection Error:", inst)
+        exit()
+    
+
+    try:
+        while t.is_alive():
+            control_message = input("Enter STOP to stop: ")
+            if control_message == "STOP":
+                thread_stop = True
+                conn.sendall("STOP".encode())
+                break
+            elif control_message == "EXIT":
+                thread_stop = True
+                exit_main_process = True
+                conn.sendall("EXIT".encode())
+                break    
+        thread_stop = True
+        t.join()
+        t1.join()
+        s_tcp.close()
+        s_udp.close()
+    
+    
+    except Exception as e:
+        print(e)
+        exit_main_progress = True
+    finally:
+        print("finally")
+        pgid = os.getpgid(tcpproc.pid)
+    
+        command = "sudo kill -9 -{}".format(pgid)
+        subprocess.check_output(command.split(" "))
