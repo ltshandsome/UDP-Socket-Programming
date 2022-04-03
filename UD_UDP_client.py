@@ -10,6 +10,7 @@ import os
 import argparse
 import subprocess
 
+#====================argument parsing==============================
 parser = argparse.ArgumentParser()
 parser.add_argument("-l", "--length", type=int,
                     help="payload length", default=250)
@@ -24,8 +25,16 @@ bandwidth = args.bandwidth
 total_time = args.time
 expected_packet_per_sec = bandwidth / (length_packet << 3)
 sleeptime = 1.0 / expected_packet_per_sec
+#==================================================================
 
+#===================global variables===============================
+thread_stop = True
+exit_main_process = False
+#==================================================================
+
+#===================other variables================================
 HOST = '140.112.17.209'
+
 try:
     f = open("port.txt", "r")
     l = f.readline()
@@ -35,13 +44,14 @@ except:
     f = open("port.txt", "w")
     f.write(PORT)
 print("PORT = ", PORT)
-server_addr = (HOST, PORT)
+CONTROL_PORT = 3299
 
-thread_stop = True
-exit_main_process = False
 pcap_path = "pcapdir"
 if not os.path.exists(pcap_path):
     os.system("mkdir %s"%(pcap_path))
+#==================================================================
+
+
 
 def connection_setup():
     print("Initial setting up...")
@@ -49,7 +59,7 @@ def connection_setup():
     s_udp = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
     s_udp.settimeout(1)
     s_tcp = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-    s_tcp.connect((HOST, PORT))
+    s_tcp.connect((HOST, CONTROL_PORT))
     
     return s_tcp, s_udp
 
@@ -78,7 +88,7 @@ def transmision(s_udp):
             redundent = os.urandom(250-4*3)
             outdata = datetimedec.to_bytes(4, 'big') + microsec.to_bytes(4, 'big') + seq.to_bytes(4, 'big') + redundent
         
-            s_udp.sendto(outdata, server_addr)
+            s_udp.sendto(outdata, (HOST, PORT))
             seq += 1
         
             if time.time()-start_time > time_slot:
