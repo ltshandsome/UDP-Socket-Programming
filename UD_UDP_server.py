@@ -9,9 +9,13 @@ import datetime as dt
 import argparse
 import subprocess
 
+
+#=================argument parsing======================
 parser = argparse.ArgumentParser()
-parser.add_argument("-p", "--port", type=int,
-                    help="port to bind", default=3237)
+parser.add_argument("-ps", "--port_start", type=int,
+                    help="port to bind, range: [start, end]", default=3280)
+parser.add_argument("-pe", "--port_end", type=int,
+                    help="port to bind, range: [start, end]", default=3287)
 parser.add_argument("-l", "--length", type=int,
                     help="payload length", default=250)
 parser.add_argument("-b", "--bandwidth", type=int,
@@ -21,45 +25,56 @@ parser.add_argument("-t", "--time", type=int,
                   
 args = parser.parse_args()
 
-HOST = '192.168.1.108'
-PORT = args.port
+PORTS = [i for i in range(args.port_start, args.port_end+1)]
 length_packet = args.length
 bandwidth = args.bandwidth
 total_time = args.time
 
-thread_stop = True
-exit_main_process = False
-
 expected_packet_per_sec = bandwidth / (length_packet << 3)
 sleeptime = 1.0 / expected_packet_per_sec
+#========================================================
 
+#=================global variables=======================
+thread_stop = True
+exit_main_process = False
+udp_addr = {}
+#========================================================
+
+#=================other variables========================
+HOST = '192.168.1.108'
+CONTROL_PORT = 3299
 pcap_path = "pcapdir"
+#========================================================
 
 def connection_setup():
     print("Initial setting up...")
     
-    s_udp = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
-    s_udp.bind((HOST, PORT))
+    s_udp_list = []
+    conn_list = []
+    
+    for PORT in PORTS:
+        s_udp = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+        s_udp.bind((HOST, PORT))
+        s_udp_list.append(s_udp)
     
     s_tcp = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-    s_tcp.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+    s_tcp.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)    
+    s_tcp.bind((HOST, CONTROL_PORT))   
+
+    print(PORTS, "wait for tcp connection...")
+    s_tcp.listen(len(PORTS))
     
-    s_tcp.bind((HOST, PORT))   
+    for i in range(len(PORTS)):
+        conn, tcp_addr = s_tcp.accept()
+        print('tcp Connected by', tcp_addr)
+        conn_list.append(conn)
 
-    print(str(PORT), "wait for tcp connection...")
-    s_tcp.listen(1)
-    conn, tcp_addr = s_tcp.accept()
-    print(str(PORT), 'tcp Connected by', tcp_addr)
+    return s_tcp, s_udp_list, conn_list
 
-
-    return s_tcp, s_udp, conn
-    
-udp_addr = None
-
-def transmision(s_udp):
+def transmision(s_udp_list):
     global thread_stop
     global udp_addr
-    print("start transmision to addr", s_udp)
+    print("start transmision: ")
     
     seq = 1
     prev_transmit = 0
@@ -82,9 +97,9 @@ def transmision(s_udp):
         redundent = os.urandom(250-4*3)
         outdata = datetimedec.to_bytes(4, 'big') + microsec.to_bytes(4, 'big') + seq.to_bytes(4, 'big') + redundent
         
-        if udp_addr != None:
-            #print(udp_addr)
-            s_udp.sendto(outdata, udp_addr)
+        for s_udp in s_udp_list:
+            if s_udp in udp_addr.keys():
+                s_udp.sendto(outdata, udp_addr[s_udp])
         seq += 1
         
         if time.time()-start_time > time_slot:
@@ -103,6 +118,7 @@ def receive(s_udp):
     number_of_received_packets = 0
     
     seq = 1
+    max_seq = 1
 
     global thread_stop
     global udp_addr
@@ -110,11 +126,13 @@ def receive(s_udp):
         try:
             
             indata, addr = s_udp.recvfrom(1024)
-            udp_addr = addr
+            udp_addr[s_udp] = addr
             
             if len(indata) != 250:
                 print("packet with strange length: ", len(indata))
             seq = int(indata.hex()[16:24], 16)
+            max_seq = max(max_seq, seq)
+            
             ts = int(int(indata.hex()[0:8], 16)) + float("0." + str(int(indata.hex()[8:16], 16)))
             
             number_of_received_packets += 1
@@ -125,7 +143,7 @@ def receive(s_udp):
     thread_stop = True
     
     print("---Experiment Complete---")
-    print("Total capture: ", number_of_received_packets, "Total lose: ", seq - number_of_received_packets)
+    print("Total capture: ", number_of_received_packets, "Total lose: ", max_seq - number_of_received_packets)
     print("STOP bypass")
 
 while not exit_main_process:
@@ -135,34 +153,45 @@ while not exit_main_process:
 
     now = dt.datetime.today()
     n = '-'.join([str(x) for x in[ now.year, now.month, now.day, now.hour, now.minute, now.second]])
-
-    tcpproc =  subprocess.Popen(["sudo tcpdump -i any port %s -w %s/%s_%s.pcap"%(PORT, pcap_path,PORT, n)], shell=True, preexec_fn = os.setpgrp)
+    
+    tcpproc_list = []
+    for PORT in PORTS:
+        tcpproc =  subprocess.Popen(["sudo tcpdump -i any port %s -w %s/%s_%s.pcap"%(PORT, pcap_path,PORT, n)], shell=True, preexec_fn = os.setpgrp)
+        tcpproc_list.append(tcpproc)
+        
     time.sleep(1)
+    
+    receiving_threads = []
+    udp_addr = {}
 
     try:
-        s_tcp, s_udp, conn = connection_setup()
+        s_tcp, s_udp_list, conn_list = connection_setup()
         
         while thread_stop == True:
             control_message = input("Enter START to start: ")
             if control_message == "START":
                 thread_stop = False
-                conn.sendall("START".encode())
-                t = threading.Thread(target = transmision, args = (s_udp, ))
-                t1 = threading.Thread(target = receive, args = (s_udp,))
-
-
+                
+                for conn in conn_list:
+                    conn.sendall("START".encode())
+                t = threading.Thread(target = transmision, args = (s_udp_list, ))
                 t.start()
-                t1.start()
+                for s_udp in s_udp_list:
+                    t1 = threading.Thread(target = receive, args = (s_udp,))
+                    t1.start()
+                    receiving_threads.append(t1)
         
     except KeyboardInterrupt as inst:
         print("keyboard interrupt: ")
-        pgid = os.getpgid(tcpproc.pid)
+        
+        for tcpproc in tcpproc_list:
+            pgid = os.getpgid(tcpproc.pid)
     
-        command = "sudo kill -9 -{}".format(pgid)
-        subprocess.check_output(command.split(" "))
+            command = "sudo kill -9 -{}".format(pgid)
+            subprocess.check_output(command.split(" "))
         exit()
     except Exception as e:
-        print("Connection Error:", inst)
+        print("Connection Error:", e)
         exit()
     
 
@@ -171,26 +200,33 @@ while not exit_main_process:
             control_message = input("Enter STOP to stop: ")
             if control_message == "STOP":
                 thread_stop = True
-                conn.sendall("STOP".encode())
+                for conn in conn_list:
+                    conn.sendall("STOP".encode())
                 break
             elif control_message == "EXIT":
                 thread_stop = True
                 exit_main_process = True
-                conn.sendall("EXIT".encode())
+                for conn in conn_list:
+                    conn.sendall("EXIT".encode())
                 break    
-        thread_stop = True
-        t.join()
-        t1.join()
-        s_tcp.close()
-        s_udp.close()
-    
-    
     except Exception as e:
         print(e)
         exit_main_progress = True
     finally:
         print("finally")
-        pgid = os.getpgid(tcpproc.pid)
+        
+        thread_stop = True
+        
+        t.join()
+        for t1 in receiving_threads:
+            t1.join()
+        
+        s_tcp.close()
+        for s_udp in s_udp_list:
+            s_udp.close()
+        
+        for tcpproc in tcpproc_list:
+            pgid = os.getpgid(tcpproc.pid)
     
-        command = "sudo kill -9 -{}".format(pgid)
-        subprocess.check_output(command.split(" "))
+            command = "sudo kill -9 -{}".format(pgid)
+            subprocess.check_output(command.split(" "))
