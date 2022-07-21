@@ -52,11 +52,13 @@ def connection_setup():
     s_udp_list = []
     conn_list = []
     
+    #--------------establish sockets for UDP data traffic----- 
     for PORT in PORTS:
         s_udp = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
         s_udp.bind((HOST, PORT))
         s_udp_list.append(s_udp)
     
+    #--------------establish TCP control flows----------------
     s_tcp = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
     s_tcp.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)    
     s_tcp.bind((HOST, CONTROL_PORT))   
@@ -71,10 +73,10 @@ def connection_setup():
 
     return s_tcp, s_udp_list, conn_list
 
-def transmision(s_udp_list):
+def transmission(s_udp_list):
     global thread_stop
     global udp_addr
-    print("start transmision: ")
+    print("start transmission: ")
     
     seq = 1
     prev_transmit = 0
@@ -94,8 +96,8 @@ def transmision(s_udp_list):
         datetimedec = int(t)
         microsec = int((t - int(t))*1000000)
         
-        redundent = os.urandom(250-4*3)
-        outdata = datetimedec.to_bytes(4, 'big') + microsec.to_bytes(4, 'big') + seq.to_bytes(4, 'big') + redundent
+        redundant = os.urandom(250-4*3)
+        outdata = datetimedec.to_bytes(4, 'big') + microsec.to_bytes(4, 'big') + seq.to_bytes(4, 'big') + redundant
         
         for s_udp in s_udp_list:
             if s_udp in udp_addr.keys():
@@ -108,7 +110,7 @@ def transmision(s_udp_list):
             prev_transmit = seq
             
     
-    print("---transmision timeout---")
+    print("---transmission timeout---")
     print("transmit", seq, "packets")
 
 
@@ -124,9 +126,9 @@ def receive(s_udp):
     global udp_addr
     while not thread_stop:
         try:
-            
+            #receive data, update client's addresses (after receiving, server know where to transmit)
             indata, addr = s_udp.recvfrom(1024)
-            udp_addr[s_udp] = addr
+            udp_addr[s_udp] = addr                     
             
             if len(indata) != 250:
                 print("packet with strange length: ", len(indata))
@@ -154,6 +156,7 @@ while not exit_main_process:
     now = dt.datetime.today()
     n = '-'.join([str(x) for x in[ now.year, now.month, now.day, now.hour, now.minute, now.second]])
     
+    #Create subprocesses to capture packets (TCPDUMP)
     tcpproc_list = []
     for PORT in PORTS:
         tcpproc =  subprocess.Popen(["sudo tcpdump -i any port %s -w %s/%s_%s.pcap"%(PORT, pcap_path,PORT, n)], shell=True, preexec_fn = os.setpgrp)
@@ -183,7 +186,7 @@ while not exit_main_process:
         
     except KeyboardInterrupt as inst:
         print("keyboard interrupt: ")
-        
+        #Kill TCPDUMP subprocesses
         for tcpproc in tcpproc_list:
             pgid = os.getpgid(tcpproc.pid)
     
@@ -217,14 +220,17 @@ while not exit_main_process:
         
         thread_stop = True
         
+        #end transmission and receive threads
         t.join()
         for t1 in receiving_threads:
             t1.join()
         
+        #close sockets
         s_tcp.close()
         for s_udp in s_udp_list:
             s_udp.close()
-        
+            
+        #Kill TCPDUMP subprocesses
         for tcpproc in tcpproc_list:
             pgid = os.getpgid(tcpproc.pid)
     
