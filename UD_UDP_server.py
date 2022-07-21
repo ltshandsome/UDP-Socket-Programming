@@ -96,7 +96,7 @@ def transmission(s_udp_list):
         datetimedec = int(t)
         microsec = int((t - int(t))*1000000)
         
-        redundant = os.urandom(250-4*3)
+        redundant = os.urandom(length_packet-4*3)
         outdata = datetimedec.to_bytes(4, 'big') + microsec.to_bytes(4, 'big') + seq.to_bytes(4, 'big') + redundant
         
         for s_udp in s_udp_list:
@@ -130,7 +130,7 @@ def receive(s_udp):
             indata, addr = s_udp.recvfrom(1024)
             udp_addr[s_udp] = addr                     
             
-            if len(indata) != 250:
+            if len(indata) != length_packet:
                 print("packet with strange length: ", len(indata))
             seq = int(indata.hex()[16:24], 16)
             max_seq = max(max_seq, seq)
@@ -177,7 +177,7 @@ while not exit_main_process:
                 
                 for conn in conn_list:
                     conn.sendall("START".encode())
-                t = threading.Thread(target = transmision, args = (s_udp_list, ))
+                t = threading.Thread(target = transmission, args = (s_udp_list, ))
                 t.start()
                 for s_udp in s_udp_list:
                     t1 = threading.Thread(target = receive, args = (s_udp,))

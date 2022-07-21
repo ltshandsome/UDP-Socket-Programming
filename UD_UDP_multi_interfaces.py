@@ -68,25 +68,28 @@ def connection_setup():
     
     s_udp_list = []
     
-    for PORT, index in zip(PORTS, range(len(PORTS))):
+    #--------------establish sockets for UDP data traffic----- 
+    for PORT in PORTS:
         s_udp = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
         s_udp.settimeout(1)
         
+        #if m=1, bind to specific interface name
         if args.multiple_interfaces == 1:
-            interface_name = 'device'+str(index) #'usb' + str(index)
+            interface_name = 'ss0'+str(PORT%10) #'usb' + str(index)
             print(interface_name)
             s_udp.setsockopt(socket.SOL_SOCKET, socket.SO_BINDTODEVICE, (interface_name+'\0').encode())
         
         s_udp_list.append(s_udp)
-    
+        
+    #--------------establish TCP control flows----------------
     s_tcp = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
     s_tcp.connect((HOST, CONTROL_PORT))
     
     return s_tcp, s_udp_list
 
-def transmision(s_udp_list):
+def transmission(s_udp_list):
     global thread_stop
-    print("start transmision: ")
+    print("start transmission: ")
     
     seq = 1
     prev_transmit = 0
@@ -106,8 +109,8 @@ def transmision(s_udp_list):
             datetimedec = int(t)
             microsec = int((t - int(t))*1000000)
         
-            redundent = os.urandom(length_packet-4*3)
-            outdata = datetimedec.to_bytes(4, 'big') + microsec.to_bytes(4, 'big') + seq.to_bytes(4, 'big') + redundent
+            redundant = os.urandom(length_packet-4*3)
+            outdata = datetimedec.to_bytes(4, 'big') + microsec.to_bytes(4, 'big') + seq.to_bytes(4, 'big') + redundant
             
             for s_udp, PORT in zip(s_udp_list, PORTS):       
                 s_udp.sendto(outdata, (HOST, PORT))
@@ -121,7 +124,7 @@ def transmision(s_udp_list):
             print(e)
             thread_stop = True
     thread_stop = True
-    print("---transmision timeout---")
+    print("---transmission timeout---")
     print("transmit", seq, "packets")
 
 def receive(s_udp, s_udp_list):
@@ -129,8 +132,8 @@ def receive(s_udp, s_udp_list):
     print("wait for indata...")
     number_of_received_packets = 0
     
-    seq = 0
-    max_seq = 0
+    seq = 1
+    max_seq = 1
 
     global thread_stop
     while not thread_stop:
@@ -194,6 +197,7 @@ while not exit_main_process:
         print("ready to setup connection...")
         s_tcp, s_udp_list = connection_setup()
         
+        #------------------wait for server ways "START"----------------
         while thread_stop == True:
             indata, addr = s_tcp.recvfrom(1024)    ###might need to check
             
@@ -215,9 +219,10 @@ while not exit_main_process:
         subprocess.check_output(command.split(" "))
         exit()
     
+    #--------------------start threads-------------------
     receiving_threads = []
     
-    t = threading.Thread(target=transmision, args=(s_udp_list, ))
+    t = threading.Thread(target=transmission, args=(s_udp_list, ))
     t3 = threading.Thread(target=remote_control, args = (s_tcp, t))
     t.start()
     t3.start()
@@ -225,10 +230,12 @@ while not exit_main_process:
     for s_udp in s_udp_list:
         t2 = threading.Thread(target=receive, args=(s_udp, s_udp_list, ))
         t2.start()
+        receiving_threads.append(t2)
     
     t.join()
     t3.join()
 
+    #------------------wait for threads end-------------
     for t2 in receiving_threads:
         t2.join()
 
