@@ -31,6 +31,7 @@ PORTS = [i for i in range(args.port_start, args.port_end+1)]
 length_packet = args.length
 bandwidth = args.bandwidth
 total_time = args.time
+number_client = args.number_client
 
 expected_packet_per_sec = bandwidth / (length_packet << 3)
 sleeptime = 1.0 / expected_packet_per_sec
@@ -66,9 +67,9 @@ def connection_setup():
     s_tcp.bind((HOST, CONTROL_PORT))   
 
     print(PORTS, "wait for tcp connection...")
-    s_tcp.listen(len(PORTS))
+    s_tcp.listen(number_client)
     
-    for i in range(len(PORTS)):
+    for i in range(number_client):
         conn, tcp_addr = s_tcp.accept()
         print('tcp Connected by', tcp_addr)
         conn_list.append(conn)
