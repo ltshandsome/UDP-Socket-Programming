@@ -16,6 +16,8 @@ parser.add_argument("-ps", "--port_start", type=int,
                     help="port to bind, range: [start, end]", default=3280)
 parser.add_argument("-pe", "--port_end", type=int,
                     help="port to bind, range: [start, end]", default=3287)
+parser.add_argument("-n", "--number_client", type=int,
+                    help="number of client", default=1)
 parser.add_argument("-l", "--length", type=int,
                     help="payload length", default=250)
 parser.add_argument("-b", "--bandwidth", type=int,
@@ -41,7 +43,7 @@ udp_addr = {}
 #========================================================
 
 #=================other variables========================
-HOST = '192.168.1.108'
+HOST = '192.168.1.181'
 CONTROL_PORT = 3299
 pcap_path = "pcapdir"
 #========================================================

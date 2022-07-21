@@ -17,7 +17,7 @@ parser.add_argument("-ps", "--port_start", type=int,
 parser.add_argument("-pe", "--port_end", type=int,
                     help="port to bind, range: [start, end]", default=3287)
 parser.add_argument("-m", "--multiple_interfaces", type=int,
-                    help="0: w/o multiple interfaces; 1: multiple interfaces", default=0)
+                    help="0: w/o multiple interfaces; 1: multiple interfaces", default=1)
 parser.add_argument("-l", "--length", type=int,
                     help="payload length", default=250)
 parser.add_argument("-b", "--bandwidth", type=int,
